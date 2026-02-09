@@ -1379,6 +1379,8 @@ func (api *API) traceBundle(ctx context.Context, bundle *Bundle, simulateContext
 	var (
 		err         error
 		block       *types.Block
+		statedb     *state.StateDB
+		release     StateReleaseFunc
 		precompiles vm.PrecompiledContracts
 	)
 	if hash, ok := simulateContext.BlockNumber.Hash(); ok {
@@ -1404,56 +1406,76 @@ func (api *API) traceBundle(ctx context.Context, bundle *Bundle, simulateContext
 	if config != nil && config.Reexec != nil {
 		reexec = *config.Reexec
 	}
-	is158 := api.backend.ChainConfig().IsEIP158(block.Number())
 
-	if err != nil {
-		return nil, err
+	if config != nil && config.TxIndex != nil {
+		_, _, statedb, release, err = api.backend.StateAtTransaction(ctx, block, int(*config.TxIndex), reexec)
+	} else {
+		statedb, release, err = api.backend.StateAtBlock(ctx, block, reexec, nil, true, false)
 	}
-	_, vmctx, statedb, release, err := api.backend.StateAtTransaction(ctx, block, simulateContext.TransactionIndex, reexec)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
 
+	// upgrade built-in system contract before tracing if Feynman is not enabled
+	if block.NumberU64() > 0 {
+		parent, err := api.blockByNumberAndHash(ctx, rpc.BlockNumber(block.NumberU64()-1), block.ParentHash())
+		if err != nil {
+			return nil, err
+		}
+		systemcontracts.TryUpdateBuildInSystemContract(api.backend.ChainConfig(), block.Number(), parent.Time(), block.Time(), statedb, true)
+	}
+
+	h := block.Header()
+	blockContext := core.NewEVMBlockContext(h, api.chainContext(ctx), nil)
+
 	// Apply the customization rules if required.
 	if config != nil {
-		rules := api.backend.ChainConfig().Rules(vmctx.BlockNumber, vmctx.Random != nil, vmctx.Time)
-
+		if err := config.BlockOverrides.Apply(&blockContext); err != nil {
+			return nil, err
+		}
+		rules := api.backend.ChainConfig().Rules(blockContext.BlockNumber, blockContext.Random != nil, blockContext.Time)
 		precompiles = vm.ActivePrecompiledContracts(rules)
 		if err := config.StateOverrides.Apply(statedb, precompiles); err != nil {
 			return nil, err
 		}
-		config.BlockOverrides.Apply(&vmctx)
+	}
+	if err := bundle.BlockOverride.Apply(&blockContext); err != nil {
+		return nil, err
 	}
 	// Execute the trace
 	for idx, args := range bundle.Transactions {
-		if err := args.CallDefaults(api.backend.RPCGasCap(), vmctx.BaseFee, api.backend.ChainConfig().ChainID); err != nil {
+		// Execute the trace.
+		if err := args.CallDefaults(api.backend.RPCGasCap(), blockContext.BaseFee, api.backend.ChainConfig().ChainID); err != nil {
 			return nil, err
 		}
-		msg := args.ToMessage(block.BaseFee(), true, true)
-		tx := args.ToTransaction(types.LegacyTxType)
-
-		var traceConfig *TraceConfig
+		var (
+			msg         = args.ToMessage(blockContext.BaseFee, true, true)
+			tx          = args.ToTransaction(types.LegacyTxType)
+			traceConfig *TraceConfig
+		)
+		// Lower the basefee to 0 to avoid breaking EVM
+		// invariants (basefee < feecap).
+		if msg.GasPrice.Sign() == 0 {
+			blockContext.BaseFee = new(big.Int)
+		}
+		if msg.BlobGasFeeCap != nil && msg.BlobGasFeeCap.BitLen() == 0 {
+			blockContext.BlobBaseFee = new(big.Int)
+		}
 		if config != nil {
 			traceConfig = &config.TraceConfig
 		}
-		var isSystemTx bool
-		if posa, ok := api.backend.Engine().(consensus.PoSA); ok {
-			if isSystem, _ := posa.IsSystemTransaction(tx, block.Header()); isSystem {
-				isSystemTx = true
-			}
-		}
+
 		txctx := &Context{
 			BlockHash:   block.Hash(),
-			BlockNumber: block.Number(),
+			BlockNumber: blockContext.BlockNumber,
 			TxIndex:     simulateContext.TransactionIndex + idx,
 		}
-		r, err := api.traceTx(ctx, tx, msg, txctx, vmctx, statedb, traceConfig, isSystemTx, precompiles)
+		r, err := api.traceTx(ctx, tx, msg, txctx, blockContext, statedb, traceConfig, false, precompiles)
 		if err != nil {
 			return result, err
 		}
 		result = append(result, r)
-		statedb.Finalise(is158)
 	}
 	return result, nil
 }

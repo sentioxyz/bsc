@@ -80,6 +80,11 @@ func (ctx *ScopeContext) Address() common.Address {
 	return ctx.Contract.Address()
 }
 
+// CodeAddress returns the address where this scope of execution is taking place.
+func (ctx *ScopeContext) CodeAddress() common.Address {
+	return ctx.Contract.CodeAddr()
+}
+
 // CallValue returns the value supplied with this call.
 func (ctx *ScopeContext) CallValue() *uint256.Int {
 	return ctx.Contract.Value()

@@ -122,8 +122,8 @@ func (diff *StateOverride) Apply(statedb *state.StateDB, precompiles vm.Precompi
 // BlockOverrides is a set of header fields to override.
 type BlockOverrides struct {
 	Number        *hexutil.Big
-	Difficulty    *hexutil.Big // No-op if we're simulating post-merge calls.
-	Time          *hexutil.Uint64
+	Difficulty    *hexutil.Big    // No-op if we're simulating post-merge calls.
+	Time          *hexutil.Uint64 `json:"timestamp"`
 	GasLimit      *hexutil.Uint64
 	FeeRecipient  *common.Address
 	PrevRandao    *common.Hash

@@ -40,15 +40,17 @@ type Contract struct {
 	// caller is the result of the caller which initialised this
 	// contract. However, when the "call method" is delegated this
 	// value needs to be initialised to that of the caller's caller.
-	caller  common.Address
-	address common.Address
+	caller   common.Address
+	address  common.Address
+	codeAddr common.Address
 
 	jumpdests map[common.Hash]bitvec // Aggregated result of JUMPDEST analysis.
 	analysis  bitvec                 // Locally cached result of JUMPDEST analysis
 
 	Code     []byte
 	CodeHash common.Hash
-	Input    []byte
+
+	Input []byte
 
 	// is the execution frame represented by this object a contract deployment
 	IsDeployment bool
@@ -166,6 +168,11 @@ func (c *Contract) Address() common.Address {
 	return c.address
 }
 
+// CodeAddr returns the contracts code address
+func (c *Contract) CodeAddr() common.Address {
+	return c.codeAddr
+}
+
 // Value returns the contract's value (sent to it from it's caller)
 func (c *Contract) Value() *uint256.Int {
 	return c.value
@@ -173,9 +180,10 @@ func (c *Contract) Value() *uint256.Int {
 
 // SetCallCode sets the code of the contract and address of the backing data
 // object
-func (c *Contract) SetCallCode(hash common.Hash, code []byte) {
+func (c *Contract) SetCallCode(addr common.Address, hash common.Hash, code []byte) {
 	c.Code = code
 	c.CodeHash = hash
+	c.codeAddr = addr
 }
 
 // SetOptimizedForTest returns a contract with optimized equals true for test purpose only
