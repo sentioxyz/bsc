@@ -40,7 +40,6 @@ type OpContext interface {
 	StackData() []uint256.Int
 	Caller() common.Address
 	Address() common.Address
-	CodeAddress() common.Address
 	CallValue() *uint256.Int
 	CallInput() []byte
 	ContractCode() []byte
